@@ -1,4 +1,12 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+// ─────────────────────────────────────────────
+// Supabase 設定
+// ─────────────────────────────────────────────
+const SUPABASE_URL = "https://fzhpsjgutyoukefwtsio.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ6aHBzamd1dHlvdWtlZnd0c2lvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxMDY0NjcsImV4cCI6MjA5MDY4MjQ2N30.11SuC4CmeF4Ztrlxt3bKr2nbnnIxtKWfoV7i-mUDL_Q";
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ─────────────────────────────────────────────
 // 定数
@@ -110,7 +118,8 @@ export default function SalonApp() {
   const [contactPopup, setContactPopup] = useState(null);
 
   // ── お知らせデータ（useState で管理）
-  const [notices, setNotices] = useState(DEFAULT_NOTICES);
+  const [notices, setNotices] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   // ── 管理パネル状態
   const [showAdmin, setShowAdmin] = useState(false);
@@ -174,8 +183,23 @@ export default function SalonApp() {
     }
   }, [pwInput]);
 
+  // ── Supabase からお知らせ取得
+  const fetchNotices = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("notices")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (!error && data) setNotices(data);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchNotices();
+  }, [fetchNotices]);
+
   // ── 追加バリデーション
-  const handleAdd = useCallback(() => {
+  const handleAdd = useCallback(async () => {
     setFormError("");
     if (!newDate.trim()) {
       setFormError("日付を入力してください");
@@ -193,18 +217,18 @@ export default function SalonApp() {
       setFormError("内容を入力してください");
       return;
     }
-    const newNotice = {
-      id: Date.now(),
+    const { error } = await supabase.from("notices").insert([{
       date: newDate.trim(),
       title: newTitle.trim(),
       body: newBody.trim(),
-    };
-    setNotices((prev) => [newNotice, ...prev]);
+    }]);
+    if (error) { setFormError("保存に失敗しました"); return; }
+    await fetchNotices();
     setNewDate("");
     setNewTitle("");
     setNewBody("");
     showSuccess("✓ 追加しました");
-  }, [newDate, newTitle, newBody, showSuccess]);
+  }, [newDate, newTitle, newBody, showSuccess, fetchNotices]);
 
   // ── 編集開始（元の値をコピー）
   const startEdit = useCallback((notice) => {
@@ -224,18 +248,18 @@ export default function SalonApp() {
   }, []);
 
   // ── 編集保存
-  const saveEdit = useCallback(() => {
+  const saveEdit = useCallback(async () => {
     if (!editTitle.trim()) return;
-    setNotices((prev) =>
-      prev.map((n) =>
-        n.id === editingId
-          ? { ...n, date: editDate.trim(), title: editTitle.trim(), body: editBody.trim() }
-          : n
-      )
-    );
+    const { error } = await supabase.from("notices").update({
+      date: editDate.trim(),
+      title: editTitle.trim(),
+      body: editBody.trim(),
+    }).eq("id", editingId);
+    if (error) { showSuccess("⚠️ 保存に失敗しました"); return; }
+    await fetchNotices();
     setEditingId(null);
     showSuccess("✓ 保存しました");
-  }, [editingId, editDate, editTitle, editBody, showSuccess]);
+  }, [editingId, editDate, editTitle, editBody, showSuccess, fetchNotices]);
 
   // ── 削除確認ダイアログを開く
   const requestDelete = useCallback((id) => {
@@ -244,11 +268,13 @@ export default function SalonApp() {
   }, []);
 
   // ── 削除実行
-  const confirmDelete = useCallback(() => {
-    setNotices((prev) => prev.filter((n) => n.id !== confirmDeleteId));
+  const confirmDelete = useCallback(async () => {
+    const { error } = await supabase.from("notices").delete().eq("id", confirmDeleteId);
+    if (error) { showSuccess("⚠️ 削除に失敗しました"); return; }
+    await fetchNotices();
     setConfirmDeleteId(null);
     showSuccess("✓ 削除しました");
-  }, [confirmDeleteId, showSuccess]);
+  }, [confirmDeleteId, showSuccess, fetchNotices]);
 
   // ── 削除キャンセル
   const cancelDelete = useCallback(() => {
@@ -412,7 +438,9 @@ export default function SalonApp() {
                   }}>⚙ 管理</button>
                 </div>
 
-                {notices.length === 0 ? (
+                {loading ? (
+                  <div style={{ textAlign:"center",color:"#CCC",fontSize:13,padding:"40px 0" }}>読み込み中...</div>
+                ) : notices.length === 0 ? (
                   <div style={{ textAlign:"center",color:"#CCC",fontSize:13,padding:"40px 0" }}>お知らせはありません</div>
                 ) : (
                   notices.map((n) => (
